@@ -1,11 +1,18 @@
 import Map from 'https://cdn.skypack.dev/ol/Map.js';
-import View from 'https://cdn.skypack.dev/ol/View.js';
-import Polygon from 'https://cdn.skypack.dev/ol/geom/Polygon.js';
+import View from 'https://cdn.skypack.dev/ol/View';
+import Polygon from 'https://cdn.skypack.dev/ol/geom/Polygon';
+import {getLength} from 'https://cdn.skypack.dev/ol/sphere';
+import LineString from 'https://cdn.skypack.dev/ol/geom/LineString';
 import Draw, {createBox, createRegularPolygon} from 'https://cdn.skypack.dev/ol/interaction/Draw.js';
 import TileLayer from 'https://cdn.skypack.dev/ol/layer/Tile';
 import VectorLayer from 'https://cdn.skypack.dev/ol/layer/Vector.js';
 import OSM from 'https://cdn.skypack.dev/ol/source/OSM.js';
 import VectorSource from 'https://cdn.skypack.dev/ol/source/Vector.js';
+
+import Feature from 'https://cdn.skypack.dev/ol/Feature';
+import Style from 'https://cdn.skypack.dev/ol/style/Style';
+import Fill from 'https://cdn.skypack.dev/ol/style/Fill';
+import Stroke from 'https://cdn.skypack.dev/ol/style/Stroke';
 
 const raster = new TileLayer({
   source: new OSM(),
@@ -27,6 +34,56 @@ const map = new Map({
 });
 
 const typeSelect = document.getElementById('type');
+
+
+function createSectorGeometryFunction(startAngleDeg = 0, endAngleDeg = 90, steps = 64) {
+  return function (coordinates, geometry) {
+    const center = coordinates[0];
+    const last = coordinates[coordinates.length - 1];
+
+    const dx = center[0] - last[0];
+    const dy = center[1] - last[1];
+    const radius = Math.sqrt(dx * dx + dy * dy);
+
+    const line = new LineString([center, last]); // координаты в EPSG:3857
+    const lengthMetersApprox = getLength(line, {
+        projection: 'EPSG:3857', // или 'EPSG:3857', если линия в веб-меркаторе
+      });
+
+    // угол поворота, как в Star
+    const rotation = Math.atan2(dy, dx) + Math.PI;
+
+    const start = startAngleDeg * Math.PI / 180;
+    const end = endAngleDeg * Math.PI / 180;
+
+    const coords = [];
+    // центр
+    coords.push(center.slice());
+
+    // дуга с учётом поворота
+    for (let i = 0; i <= steps; i++) {
+      const t = start + (end - start) * (i / steps);
+      const angle = rotation + t;
+      const x = center[0] + radius * Math.cos(angle);
+      const y = center[1] + radius * Math.sin(angle);
+      coords.push([x, y]);
+    }
+
+    // замыкаем в центр
+    coords.push(center.slice());
+
+    if (!geometry) {
+      geometry = new Polygon([coords]);
+    } else {
+      geometry.setCoordinates([coords]);
+    }
+    
+    console.log(lengthMetersApprox);
+
+    return geometry;
+  };
+}
+
 
 let draw; // global so we can remove it later
 function addInteraction() {
@@ -65,7 +122,14 @@ function addInteraction() {
         }
         return geometry;
       };
+    } else if (value === 'Sector') {
+        // наш новый тип
+        value = 'Circle';
+        // тут задаём нужные углы сектора
+        let width = 120
+        geometryFunction = createSectorGeometryFunction(-width/2, width/2); // сектор 0–90°
     }
+
     draw = new Draw({
       source: source,
       type: value,
